@@ -1,10 +1,11 @@
 // ============================================================
-// CHIPML STUDIO - SCRIPT PRINCIPAL
+// CHIPML STUDIO - SCRIPT PRINCIPAL (v2.0)
+// Compatible con GitHub Pages y moviles
 // ============================================================
 
-// ---------- CONFIGURACIÓN GLOBAL ----------
+// ---------- DETECCION DE ENTORNO ----------
 const AudioContext = window.AudioContext || window.webkitAudioContext;
-let audioCtx = null; // Se inicializa en el primer play
+let audioCtx = null;
 let chipEngine = null;
 let scheduler = null;
 let currentSong = null;
@@ -12,7 +13,7 @@ let playbackStartTime = 0;
 let playbackPaused = false;
 let currentLoop = 0;
 let totalLoops = 0;
-let editor = null; // Instancia de CodeMirror
+let editor = null;
 
 // ---------- ELEMENTOS DEL DOM ----------
 const btnPlay = document.getElementById('btn-play');
@@ -23,6 +24,8 @@ const btnLoad = document.getElementById('btn-load');
 const btnSave = document.getElementById('btn-save');
 const btnLoadExample = document.getElementById('btn-load-example');
 const btnUpdateTxt = document.getElementById('btn-update-txt');
+const btnToggleMixer = document.getElementById('btn-toggle-mixer');
+const btnCloseMixer = document.getElementById('btn-close-mixer');
 const fileInput = document.getElementById('file-input');
 const editorStatus = document.getElementById('editor-status');
 const playbackIndicator = document.getElementById('playback-indicator');
@@ -32,6 +35,7 @@ const chipDisplay = document.getElementById('chip-display');
 const loadingOverlay = document.getElementById('loading-overlay');
 const helpPanel = document.getElementById('help-panel');
 const editorWrapper = document.getElementById('editor-wrapper');
+const mixerPanel = document.getElementById('mixer-panel');
 const tabs = document.querySelectorAll('.tab');
 
 // Sliders y valores
@@ -57,11 +61,16 @@ const sliderValues = {
     transpose: document.getElementById('transpose-value')
 };
 
-// ---------- INICIALIZACIÓN DEL EDITOR CODEMIRROR ----------
-document.addEventListener('DOMContentLoaded', () => {
-    // Configurar CodeMirror
+// ---------- INICIALIZACION SEGURA ----------
+window.addEventListener('load', () => {
+    if (typeof CodeMirror === 'undefined') {
+        alert('Error: No se pudo cargar CodeMirror. Verifica tu conexion a Internet.');
+        return;
+    }
+
+    // Inicializar CodeMirror
     editor = CodeMirror.fromTextArea(document.getElementById('chipml-editor'), {
-        mode: 'javascript', // Modo básico; se puede extender
+        mode: 'javascript',
         theme: 'monokai',
         lineNumbers: true,
         lineWrapping: false,
@@ -101,7 +110,11 @@ document.addEventListener('DOMContentLoaded', () => {
     btnUpdateTxt.addEventListener('click', updateTextFromSliders);
     fileInput.addEventListener('change', loadFile);
 
-    // Eventos de sliders para actualizar valores mostrados y motor en tiempo real
+    // Toggle mezclador movil
+    btnToggleMixer.addEventListener('click', toggleMixer);
+    btnCloseMixer.addEventListener('click', closeMixer);
+
+    // Sliders
     Object.keys(sliders).forEach(key => {
         if (sliders[key]) {
             sliders[key].addEventListener('input', () => {
@@ -116,16 +129,28 @@ document.addEventListener('DOMContentLoaded', () => {
     // Inicializar etiquetas
     Object.keys(sliderValues).forEach(key => updateSliderLabel(key));
 
-    // Evento de cambio de chip
+    // Cambio de chip
     sliders.chip.addEventListener('change', () => {
         if (chipEngine && currentSong) {
-            // Reiniciar canales en el mezclador (no implementado en profundidad)
-            updateChannelSliders(sliders.chip.value);
+            // Reiniciar motor
+            stopPlayback();
+            togglePlay();
+        }
+        updateChannelSliders(sliders.chip.value);
+    });
+
+    // Cerrar mezclador si se toca fuera (en movil)
+    document.addEventListener('click', (e) => {
+        if (window.innerWidth <= 750 && mixerPanel.classList.contains('mixer-visible')) {
+            if (!mixerPanel.contains(e.target) && e.target !== btnToggleMixer && !btnToggleMixer.contains(e.target)) {
+                closeMixer();
+            }
         }
     });
+
+    updateChannelSliders('nes');
 });
 
-// ---------- FUNCIONES DE UI ----------
 function updateSliderLabel(key) {
     const slider = sliders[key];
     const label = sliderValues[key];
@@ -133,46 +158,50 @@ function updateSliderLabel(key) {
     label.textContent = slider.value;
 }
 
+function toggleMixer() {
+    mixerPanel.classList.toggle('mixer-visible');
+}
+
+function closeMixer() {
+    mixerPanel.classList.remove('mixer-visible');
+}
+
 function updateChannelSliders(chip) {
-    // Simplemente ocultar/mostrar sliders según chip (se podría mejorar)
     const container = document.getElementById('channel-sliders');
     let html = '';
     if (chip === 'nes') {
         html = `<h3>Canales NES</h3>
-            <div class="slider-row"><label for="vol-A">Pulso A</label><input type="range" id="vol-A" min="0" max="15" value="${sliders.volA.value}" step="1"><span class="vol-value">${sliders.volA.value}</span><canvas class="vu-meter" id="vu-A" width="40" height="8"></canvas></div>
-            <div class="slider-row"><label for="vol-B">Pulso B</label><input type="range" id="vol-B" min="0" max="15" value="${sliders.volB.value}" step="1"><span class="vol-value">${sliders.volB.value}</span><canvas class="vu-meter" id="vu-B" width="40" height="8"></canvas></div>
-            <div class="slider-row"><label for="vol-C">Triángulo</label><input type="range" id="vol-C" min="0" max="15" value="${sliders.volC.value}" step="1"><span class="vol-value">${sliders.volC.value}</span><canvas class="vu-meter" id="vu-C" width="40" height="8"></canvas></div>
-            <div class="slider-row"><label for="vol-N">Ruido</label><input type="range" id="vol-N" min="0" max="15" value="${sliders.volN.value}" step="1"><span class="vol-value">${sliders.volN.value}</span><canvas class="vu-meter" id="vu-N" width="40" height="8"></canvas></div>`;
-    } else if (chip === 'gb') {
-        html = `<h3>Canales Game Boy</h3>
-            <div class="slider-row"><label for="vol-A">Pulso 1</label><input type="range" id="vol-A" min="0" max="15" value="${sliders.volA.value}" step="1"><span class="vol-value">${sliders.volA.value}</span><canvas class="vu-meter" id="vu-A" width="40" height="8"></canvas></div>
-            <div class="slider-row"><label for="vol-B">Pulso 2</label><input type="range" id="vol-B" min="0" max="15" value="${sliders.volB.value}" step="1"><span class="vol-value">${sliders.volB.value}</span><canvas class="vu-meter" id="vu-B" width="40" height="8"></canvas></div>
-            <div class="slider-row"><label for="vol-W">Wavetable</label><input type="range" id="vol-W" min="0" max="15" value="10" step="1"><span class="vol-value">10</span></div>
-            <div class="slider-row"><label for="vol-N">Ruido</label><input type="range" id="vol-N" min="0" max="15" value="${sliders.volN.value}" step="1"><span class="vol-value">${sliders.volN.value}</span><canvas class="vu-meter" id="vu-N" width="40" height="8"></canvas></div>`;
-    } // Otros chips simplificados...
+            <div class="slider-row"><label for="vol-A">Pulso A</label><input type="range" id="vol-A" min="0" max="15" value="${sliders.volA ? sliders.volA.value : 11}" step="1"><span class="vol-value">${sliders.volA ? sliders.volA.value : 11}</span><canvas class="vu-meter" id="vu-A" width="40" height="8"></canvas></div>
+            <div class="slider-row"><label for="vol-B">Pulso B</label><input type="range" id="vol-B" min="0" max="15" value="${sliders.volB ? sliders.volB.value : 9}" step="1"><span class="vol-value">${sliders.volB ? sliders.volB.value : 9}</span><canvas class="vu-meter" id="vu-B" width="40" height="8"></canvas></div>
+            <div class="slider-row"><label for="vol-C">Triangulo</label><input type="range" id="vol-C" min="0" max="15" value="${sliders.volC ? sliders.volC.value : 13}" step="1"><span class="vol-value">${sliders.volC ? sliders.volC.value : 13}</span><canvas class="vu-meter" id="vu-C" width="40" height="8"></canvas></div>
+            <div class="slider-row"><label for="vol-N">Ruido</label><input type="range" id="vol-N" min="0" max="15" value="${sliders.volN ? sliders.volN.value : 14}" step="1"><span class="vol-value">${sliders.volN ? sliders.volN.value : 14}</span><canvas class="vu-meter" id="vu-N" width="40" height="8"></canvas></div>`;
+    } else {
+        html = `<h3>Canales (configuracion basica)</h3>`;
+    }
     container.innerHTML = html;
-    // Reasignar referencias
+    // Reasignar referencias a sliders
     ['volA','volB','volC','volN'].forEach(id => {
         const el = document.getElementById(`vol-${id.slice(-1)}`);
-        if (el) sliders[id] = el;
+        if (el) {
+            sliders[id] = el;
+            el.addEventListener('input', () => {
+                updateSliderLabel(id);
+                if (chipEngine) applySliderToEngine(id);
+            });
+        }
     });
 }
 
 function applySliderToEngine(key) {
     const value = parseInt(sliders[key].value);
     switch(key) {
-        case 'tempo':
-            // Cambiar tempo en caliente (requiere reschedule)
-            break;
         case 'master':
-            if (chipEngine.masterGain) {
-                chipEngine.masterGain.gain.value = value / 15;
-            }
+            if (chipEngine && chipEngine.masterGain) chipEngine.masterGain.gain.value = value / 15;
             break;
-        case 'volA': chipEngine.setChannelVolume('A', value / 15); break;
-        case 'volB': chipEngine.setChannelVolume('B', value / 15); break;
-        case 'volC': chipEngine.setChannelVolume('C', value / 15); break;
-        case 'volN': chipEngine.setChannelVolume('N', value / 15); break;
+        case 'volA': if (chipEngine) chipEngine.setChannelVolume('A', value / 15); break;
+        case 'volB': if (chipEngine) chipEngine.setChannelVolume('B', value / 15); break;
+        case 'volC': if (chipEngine) chipEngine.setChannelVolume('C', value / 15); break;
+        case 'volN': if (chipEngine) chipEngine.setChannelVolume('N', value / 15); break;
     }
 }
 
@@ -193,7 +222,7 @@ B: t140 o3 l8 v9 @2 e g >c< e c <b- a r4
 C: t140 o2 l4 v13 @3 c8 g8 >c8 c8 <f8 c8 g8 g8
 N: t140 l16 v14 @4 [n8 n16 n8 n16]4`;
     editor.setValue(example);
-    globalStatus.textContent = '🟢 Ejemplo NES cargado';
+    globalStatus.textContent = '[*] Ejemplo NES cargado';
     chipDisplay.textContent = 'Chip: NES';
     sliders.chip.value = 'nes';
     updateChannelSliders('nes');
@@ -203,7 +232,7 @@ function saveFile() {
     const text = editor.getValue();
     const blob = new Blob([text], {type: 'text/plain'});
     saveAs(blob, 'mi_cancion.chipml');
-    globalStatus.textContent = '💾 Archivo guardado';
+    globalStatus.textContent = '[>>] Archivo guardado';
 }
 
 function loadFile(e) {
@@ -212,39 +241,36 @@ function loadFile(e) {
     const reader = new FileReader();
     reader.onload = (ev) => {
         editor.setValue(ev.target.result);
-        globalStatus.textContent = '📂 Archivo cargado';
-        // Intentar extraer chip
+        globalStatus.textContent = '[<<] Archivo cargado';
         const firstLines = ev.target.result.split('\n').slice(0,5).join('\n');
         const chipMatch = firstLines.match(/#chip\s+(\w+)/);
         if (chipMatch) {
             sliders.chip.value = chipMatch[1];
             updateChannelSliders(chipMatch[1]);
-            chipDisplay.textContent = `Chip: ${chipMatch[1].toUpperCase()}`;
+            chipDisplay.textContent = 'Chip: ' + chipMatch[1].toUpperCase();
         }
     };
     reader.readAsText(file);
+    fileInput.value = ''; // permite recargar el mismo archivo
 }
 
 // ---------- ACTUALIZAR TXT DESDE SLIDERS ----------
 function updateTextFromSliders() {
     let text = editor.getValue();
-    const lines = text.split('\n');
-    // Actualizar o agregar directivas
-    const newDirectives = {
+    // Reemplazar directivas existentes o agregarlas
+    const directives = {
         '#tempo': sliders.tempo.value,
         '#master_volume': sliders.master.value,
         '#loop': sliders.loop.value,
         '#transpose': sliders.transpose.value,
         '#chip': sliders.chip.value
     };
-    
-    // Reemplazar o insertar directivas en las primeras líneas
-    for (const [key, val] of Object.entries(newDirectives)) {
+    for (const [key, val] of Object.entries(directives)) {
         const regex = new RegExp(`^${key}\\s+.*$`, 'm');
         if (regex.test(text)) {
             text = text.replace(regex, `${key} ${val}`);
         } else {
-            // Insertar después de #chip si existe
+            // Insertar despues de #chip si existe
             const chipIdx = text.indexOf('#chip');
             if (chipIdx !== -1) {
                 const endOfLine = text.indexOf('\n', chipIdx);
@@ -254,38 +280,29 @@ function updateTextFromSliders() {
             }
         }
     }
-
-    // Ajustar volúmenes en los canales (buscar inicio de cada canal)
-    const channelVols = {
-        'A': sliders.volA.value,
-        'B': sliders.volB.value,
-        'C': sliders.volC.value,
-        'N': sliders.volN.value
-    };
-    for (const [ch, vol] of Object.entries(channelVols)) {
+    // Ajustar volumenes de canales (busca inicio de linea A:, B:,...)
+    const chVols = { 'A': sliders.volA.value, 'B': sliders.volB.value, 'C': sliders.volC.value, 'N': sliders.volN.value };
+    for (const [ch, vol] of Object.entries(chVols)) {
         const chRegex = new RegExp(`^${ch}:`, 'm');
         const match = text.match(chRegex);
         if (match) {
             const lineStart = text.lastIndexOf('\n', match.index) + 1;
             const lineEnd = text.indexOf('\n', match.index);
             let line = text.substring(lineStart, lineEnd);
-            // Reemplazar o añadir v...
             if (/v\d+/.test(line)) {
                 line = line.replace(/v\d+/, `v${vol}`);
             } else {
-                // Insertar v después del primer comando de nota o tempo
                 line = line.replace(/^(\w+:\s*)/, `$1v${vol} `);
             }
             text = text.substring(0, lineStart) + line + text.substring(lineEnd);
         }
     }
-
     editor.setValue(text);
-    globalStatus.textContent = '♻ TXT actualizado con ajustes';
+    globalStatus.textContent = '[R] TXT actualizado con ajustes';
 }
 
 // ============================================================
-// PARSER CHIPML
+// PARSER CHIPML MEJORADO
 // ============================================================
 function parseChipML(text) {
     const song = {
@@ -297,20 +314,16 @@ function parseChipML(text) {
     };
 
     const lines = text.split('\n');
-    let lineNumber = 0;
     let currentMacro = null;
 
     // Primera pasada: recolectar directivas, instrumentos y macros
     const channelLines = [];
-    for (const rawLine of lines) {
-        lineNumber++;
+    for (let rawLine of lines) {
         let line = rawLine.trim();
-        // Eliminar comentarios
         const commentIdx = line.indexOf('#');
         if (commentIdx !== -1) line = line.substring(0, commentIdx).trim();
-        if (line === '') continue;
+        if (!line) continue;
 
-        // Directiva #
         if (line.startsWith('#')) {
             const parts = line.slice(1).split(/\s+/);
             const key = '#' + parts[0].toLowerCase();
@@ -321,12 +334,10 @@ function parseChipML(text) {
                 case '#loop': song.directives.loop = parseInt(value) || 1; break;
                 case '#master_volume': song.directives.master_volume = parseInt(value) || 12; break;
                 case '#transpose': song.directives.transpose = parseInt(value) || 0; break;
-                // Otros filtros etc.
             }
             continue;
         }
 
-        // Instrumento !
         if (line.startsWith('!')) {
             const instMatch = line.match(/^!(\d+)\s+(.*)/);
             if (instMatch) {
@@ -341,13 +352,12 @@ function parseChipML(text) {
             continue;
         }
 
-        // Macro $
         if (line.startsWith('$') && line.includes('{')) {
             const macroMatch = line.match(/^(\$\w+)\s*\{/);
             if (macroMatch) {
                 currentMacro = macroMatch[1];
                 song.macros[currentMacro] = '';
-                const rest = line.substring(line.indexOf('{')+1);
+                let rest = line.substring(line.indexOf('{')+1);
                 if (rest.includes('}')) {
                     song.macros[currentMacro] = rest.split('}')[0].trim();
                     currentMacro = null;
@@ -367,19 +377,17 @@ function parseChipML(text) {
             continue;
         }
 
-        // Canal
         if (/^[A-Za-z0-9]+:/.test(line)) {
             channelLines.push(line);
         }
     }
 
-    // Expandir macros en los canales
+    // Expandir macros
     const expandedChannels = {};
     for (const chLine of channelLines) {
         const colonIdx = chLine.indexOf(':');
         const chName = chLine.substring(0, colonIdx).trim();
         let chContent = chLine.substring(colonIdx+1).trim();
-        // Expandir macros recursivamente (simple)
         for (const [macro, def] of Object.entries(song.macros)) {
             chContent = chContent.replace(new RegExp('\\'+macro, 'g'), def);
         }
@@ -387,7 +395,7 @@ function parseChipML(text) {
         expandedChannels[chName] += (expandedChannels[chName] ? ' ' : '') + chContent;
     }
 
-    // Segunda pasada: parsear cada canal en eventos
+    // Parsear canales
     const tempo = song.directives.tempo;
     const transpose = song.directives.transpose;
     let maxTime = 0;
@@ -402,8 +410,21 @@ function parseChipML(text) {
         }
     }
 
-    song.totalDuration = maxTime * (song.directives.loop === 0 ? 9999 : song.directives.loop);
+    const loop = song.directives.loop;
+    song.totalDuration = maxTime * (loop === 0 ? 1 : loop);
+    if (loop === 0) song.totalDuration = 600; // maximo 10 minutos para exportacion infinita
     return song;
+}
+
+function tokenize(content) {
+    // Tokeniza notas, comandos, numeros, etc.
+    const tokens = [];
+    const regex = /[a-g][+\-]?|r|o|>|<|l|v|@|t|k|\[|\]|\d+|\.|&|\$|_|E\d|[,]|[+\-]/g;
+    let match;
+    while ((match = regex.exec(content)) !== null) {
+        tokens.push(match[0]);
+    }
+    return tokens;
 }
 
 function parseChannel(content, tempo, transpose) {
@@ -411,15 +432,18 @@ function parseChannel(content, tempo, transpose) {
     const events = [];
     let currentTime = 0;
     let currentOctave = 4;
-    let currentLength = 4; // negra por defecto
+    let currentLength = 4; // negra
     let currentVolume = 10;
     let currentInstrument = 1;
     let currentTempo = tempo;
     let currentTranspose = transpose;
-    let noteLength = 60 / currentTempo * (4 / currentLength); // segundos por figura
+    let noteLength = 60 / currentTempo * (4 / currentLength);
     let tie = false;
 
     const noteMap = { c:0, d:2, e:4, f:5, g:7, a:9, b:11 };
+
+    // Pila para repeticiones (indices)
+    let repeatStack = [];
 
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
@@ -431,18 +455,15 @@ function parseChannel(content, tempo, transpose) {
             let semitone = noteMap[note] + (accidental === '+' ? 1 : accidental === '-' ? -1 : 0);
             let midi = (currentOctave + 1) * 12 + semitone + currentTranspose;
             let duration = noteLength;
-            // Puntillo
             if (i+1 < tokens.length && tokens[i+1] === '.') {
                 duration *= 1.5;
                 i++;
             }
-            // Duración explícita (número)
             if (i+1 < tokens.length && /^\d+$/.test(tokens[i+1])) {
                 const explicitLen = parseInt(tokens[i+1]);
                 duration = 60 / currentTempo * (4 / explicitLen);
                 i++;
             }
-            // Ligadura
             if (i+1 < tokens.length && tokens[i+1] === '&') {
                 tie = true;
                 i++;
@@ -480,7 +501,7 @@ function parseChannel(content, tempo, transpose) {
             case 'o': currentOctave = parseInt(tokens[++i]); break;
             case '>': currentOctave++; break;
             case '<': currentOctave--; break;
-            case 'l': 
+            case 'l':
                 currentLength = parseInt(tokens[++i]);
                 noteLength = 60 / currentTempo * (4 / currentLength);
                 break;
@@ -491,5 +512,6 @@ function parseChannel(content, tempo, transpose) {
                 noteLength = 60 / currentTempo * (4 / currentLength);
                 break;
             case 'k': currentTranspose = parseInt(tokens[++i]); break;
-            // Efectos y repeticiones simplificados (no implementados a fondo)
-        
+            case '[':
+                // Guardar posicion actual para repetir
+                repeatStack.push({ start: i+1, time: currentTime, octave: currentOctave, length: currentLength, volume: currentVolume, instrument: currentI
