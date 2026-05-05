@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ChipML Studio — Lenguaje de Programación Musical Chiptune</title>
+
+    <!-- ============================================================
+    LIBRERÍAS EXTERNAS (CDN)
+    ============================================================ -->
+    <!-- CodeMirror: Editor de texto con resaltado de sintaxis -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/theme/monokai.min.css">
+
+    <!-- FileSaver.js: Para descargar archivos desde el navegador -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/FileSaver.js/2.0.5/FileSaver.min.js"></script>
+
+    <!-- lamejs: Codificación MP3 en JavaScript puro -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/lamejs/1.2.1/lame.min.js"></script>
+
+    <!-- CodeMirror JS -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+
+    <!-- Nuestro CSS personalizado -->
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+    <!-- ============================================================
+    CONTENEDOR PRINCIPAL
+    ============================================================ -->
+    <div id="app-container">
+
+        <!-- ========================================================
+        BARRA SUPERIOR (HEADER)
+        ======================================================== -->
+        <header id="top-bar">
+            <div class="logo-section">
+                <span class="logo-icon">🎵</span>
+                <h1 class="logo-title">ChipML <span class="logo-subtitle">Studio</span></h1>
+            </div>
+
+            <div class="transport-controls">
+                <button id="btn-play" class="btn btn-primary" title="Reproducir / Pausar">
+                    <span class="icon">▶</span> Play
+                </button>
+                <button id="btn-stop" class="btn btn-danger" title="Detener reproducción">
+                    <span class="icon">⏹</span> Stop
+                </button>
+                <button id="btn-export-mp3" class="btn btn-export" title="Exportar a MP3">
+                    <span class="icon">💾</span> Exportar MP3
+                </button>
+                <button id="btn-export-wav" class="btn btn-export" title="Exportar a WAV">
+                    <span class="icon">💿</span> WAV
+                </button>
+            </div>
+
+            <div class="file-controls">
+                <button id="btn-load" class="btn btn-file" title="Cargar archivo .chipml">
+                    <span class="icon">📂</span> Cargar
+                </button>
+                <button id="btn-save" class="btn btn-file" title="Guardar archivo .chipml">
+                    <span class="icon">📁</span> Guardar
+                </button>
+                <button id="btn-load-example" class="btn btn-file" title="Cargar ejemplo NES">
+                    <span class="icon">📋</span> Ejemplo
+                </button>
+            </div>
+        </header>
+
+        <!-- ========================================================
+        ÁREA PRINCIPAL: EDITOR + PANEL LATERAL
+        ======================================================== -->
+        <main id="main-area">
+
+            <!-- ====================================================
+            EDITOR DE TEXTO (CodeMirror)
+            ==================================================== -->
+            <section id="editor-section">
+                <div id="editor-tabs">
+                    <span class="tab active" data-tab="editor">📝 Editor ChipML</span>
+                    <span class="tab" data-tab="help">❓ Ayuda Rápida</span>
+                </div>
+                <div id="editor-wrapper">
+                    <textarea id="chipml-editor" placeholder="Escribe tu código ChipML aquí..."></textarea>
+                </div>
+                <div id="help-panel" style="display: none;">
+                    <pre id="help-content">
+Comandos básicos:
+  a b c d e f g   → Notas (la, si, do, re, mi, fa, sol)
+  + / -           → Sostenido / Bemol
+  o&lt;n&gt;            → Octava (o4, o5...)
+  &gt; / &lt;           → Subir/Bajar octava
+  l&lt;n&gt;            → Duración (1=redonda, 4=negra, 8=corchea)
+  .               → Puntillo
+  r               → Silencio
+  v&lt;n&gt;            → Volumen (0-15)
+  @&lt;n&gt;            → Instrumento
+  t&lt;n&gt;            → Tempo (BPM)
+  [ ... ]&lt;n&gt;      → Repetir n veces
+  $nombre         → Llamar macro
+  E&lt;n&gt;,&lt;params&gt;   → Efectos
+  #               → Comentario
+
+Efectos:
+  E0,x           → Vibrato
+  E1,x,y         → Portamento
+  E2,x           → Duty cycle
+  E3,t,a,d,s,r   → Envolvente ADSR
+  E4,x           → Slide volumen
+  E5             → Glissando
+
+Directivas:
+  #chip nes|gb|c64|genesis
+  #tempo &lt;BPM&gt;
+  #loop &lt;nº&gt;
+  #master_volume &lt;0-15&gt;
+  #transpose &lt;semitones&gt;
+                    </pre>
+                </div>
+                <div id="editor-status">
+                    <span id="line-count">Línea: 1, Col: 1</span>
+                    <span id="cursor-position">Pos: 0</span>
+                    <span id="playback-indicator" class="hidden">▶ Reproduciendo...</span>
+                </div>
+            </section>
+
+            <!-- ====================================================
+            PANEL LATERAL DE MEZCLA Y AJUSTES
+            ==================================================== -->
+            <aside id="mixer-panel">
+                <h2 class="panel-title">🎚️ Mezclador</h2>
+
+                <!-- Selector de chip -->
+                <div class="mixer-group">
+                    <label for="chip-select">Chip:</label>
+                    <select id="chip-select">
+                        <option value="nes" selected>NES (2A03)</option>
+                        <option value="gb">Game Boy (DMG)</option>
+                        <option value="c64">Commodore 64 (SID)</option>
+                        <option value="genesis">Sega Genesis (YM2612)</option>
+                    </select>
+                </div>
+
+                <!-- Sliders de volumen por canal (NES por defecto) -->
+                <div class="mixer-group" id="channel-sliders">
+                    <h3>Canales</h3>
+                    <div class="slider-row">
+                        <label for="vol-A">Pulso A</label>
+                        <input type="range" id="vol-A" min="0" max="15" value="11" step="1">
+                        <span class="vol-value">11</span>
+                        <canvas class="vu-meter" id="vu-A" width="40" height="8"></canvas>
+                    </div>
+                    <div class="slider-row">
+                        <label for="vol-B">Pulso B</label>
+                        <input type="range" id="vol-B" min="0" max="15" value="9" step="1">
+                        <span class="vol-value">9</span>
+                        <canvas class="vu-meter" id="vu-B" width="40" height="8"></canvas>
+                    </div>
+                    <div class="slider-row">
+                        <label for="vol-C">Triángulo</label>
+                        <input type="range" id="vol-C" min="0" max="15" value="13" step="1">
+                        <span class="vol-value">13</span>
+                        <canvas class="vu-meter" id="vu-C" width="40" height="8"></canvas>
+                    </div>
+                    <div class="slider-row">
+                        <label for="vol-N">Ruido</label>
+                        <input type="range" id="vol-N" min="0" max="15" value="14" step="1">
+                        <span class="vol-value">14</span>
+                        <canvas class="vu-meter" id="vu-N" width="40" height="8"></canvas>
+                    </div>
+                </div>
+
+                <!-- Slider de tempo -->
+                <div class="mixer-group">
+                    <label for="tempo-slider">Tempo (BPM): <span id="tempo-value">140</span></label>
+                    <input type="range" id="tempo-slider" min="40" max="300" value="140" step="1">
+                </div>
+
+                <!-- Slider de volumen maestro -->
+                <div class="mixer-group">
+                    <label for="master-vol">Volumen Maestro: <span id="master-vol-value">12</span></label>
+                    <input type="range" id="master-vol" min="0" max="15" value="12" step="1">
+                </div>
+
+                <!-- Transposición -->
+                <div class="mixer-group">
+                    <label for="transpose-slider">Transposición (semitonos): <span id="transpose-value">0</span></label>
+                    <input type="range" id="transpose-slider" min="-12" max="12" value="0" step="1">
+                </div>
+
+                <!-- Loop -->
+                <div class="mixer-group">
+                    <label for="loop-input">Repeticiones (0=∞):</label>
+                    <input type="number" id="loop-input" min="0" max="99" value="2" step="1">
+                </div>
+
+                <!-- Botón Actualizar TXT -->
+                <div class="mixer-group">
+                    <button id="btn-update-txt" class="btn btn-action" title="Actualizar el texto del editor con los ajustes del mezclador">
+                        ♻ Actualizar TXT
+                    </button>
+                </div>
+
+                <!-- Estado general -->
+                <div class="mixer-group" id="status-box">
+                    <p id="global-status">🟢 Listo</p>
+                    <p id="time-display">⏱ 00:00 / 00:00</p>
+                    <p id="chip-display">Chip: NES</p>
+                </div>
+            </aside>
+
+        </main>
+
+        <!-- ========================================================
+        BARRA INFERIOR (FOOTER)
+        ======================================================== -->
+        <footer id="bottom-bar">
+            <div class="footer-left">
+                <span>ChipML Studio v1.0</span>
+                <span class="separator">|</span>
+                <span>Lenguaje de Programación Musical Chiptune</span>
+            </div>
+            <div class="footer-right">
+                <span>Web Audio API</span>
+                <span class="separator">|</span>
+                <span>GitHub Pages Ready</span>
+            </div>
+        </footer>
+
+        <!-- ========================================================
+        OVERLAY DE CARGA (para feedback visual)
+        ======================================================== -->
+        <div id="loading-overlay" style="display: none;">
+            <div class="spinner"></div>
+            <p>Procesando...</p>
+        </div>
+
+        <!-- ========================================================
+        INPUT OCULTO PARA CARGA DE ARCHIVOS
+        ======================================================== -->
+        <input type="file" id="file-input" accept=".chipml,.txt" style="display: none;">
+
+    </div>
+
+    <!-- ============================================================
+    SCRIPTS
+    ============================================================ -->
+    <!-- Nuestro script principal -->
+    <script src="script.js"></script>
+
+</body>
+  </html>
